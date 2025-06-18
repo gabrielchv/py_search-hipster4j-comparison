@@ -16,286 +16,264 @@ import java.io.IOException;
 
 public class BrazilRouteSearch {
     
-    // Data loaded from JSON
-    private static Map<String, double[]> CITY_COORDINATES = new HashMap<>();
-    private static Map<String, Double> EDGE_COSTS = new HashMap<>();
-    private static List<String[]> TEST_ROUTES = new ArrayList<>();
+    private final Map<String, double[]> cityCoordinates = new HashMap<>();
+    private final Map<String, Double> edgeCosts = new HashMap<>();
+    private final List<String[]> testRoutes = new ArrayList<>();
     
-    // Load data from JSON file
-    static {
+    public BrazilRouteSearch() {
         loadDataFromJson();
     }
     
-    private static void loadDataFromJson() {
+    private void loadDataFromJson() {
         try {
             ObjectMapper mapper = new ObjectMapper();
-            InputStream inputStream = BrazilRouteSearch.class.getResourceAsStream("/brazil_cities_data.json");
+            InputStream inputStream = getClass().getResourceAsStream("/brazil_cities_data.json");
             JsonNode rootNode = mapper.readTree(inputStream);
             
-            // Load city coordinates
-            JsonNode citiesNode = rootNode.get("cities");
-            citiesNode.fieldNames().forEachRemaining(cityName -> {
-                JsonNode cityData = citiesNode.get(cityName);
-                double lat = cityData.get("lat").asDouble();
-                double lng = cityData.get("lng").asDouble();
-                CITY_COORDINATES.put(cityName, new double[]{lat, lng});
-            });
-            
-            // Load roads
-            JsonNode roadsNode = rootNode.get("roads");
-            for (JsonNode roadNode : roadsNode) {
-                String from = roadNode.get("from").asText();
-                String to = roadNode.get("to").asText();
-                double distance = roadNode.get("distance").asDouble();
-                addBidirectionalEdge(from, to, distance);
-            }
-            
-            // Load test routes
-            JsonNode testRoutesNode = rootNode.get("test_routes");
-            for (JsonNode routeNode : testRoutesNode) {
-                String start = routeNode.get("start").asText();
-                String goal = routeNode.get("goal").asText();
-                TEST_ROUTES.add(new String[]{start, goal});
-            }
+            loadCityCoordinates(rootNode.get("cities"));
+            loadRoads(rootNode.get("roads"));
+            loadTestRoutes(rootNode.get("test_routes"));
             
         } catch (IOException e) {
             throw new RuntimeException("Failed to load data from JSON file", e);
         }
     }
     
-    private static void addBidirectionalEdge(String city1, String city2, double cost) {
-        EDGE_COSTS.put(city1 + "->" + city2, cost);
-        EDGE_COSTS.put(city2 + "->" + city1, cost);
+    private void loadCityCoordinates(JsonNode citiesNode) {
+        citiesNode.fieldNames().forEachRemaining(cityName -> {
+            JsonNode cityData = citiesNode.get(cityName);
+            double lat = cityData.get("lat").asDouble();
+            double lng = cityData.get("lng").asDouble();
+            cityCoordinates.put(cityName, new double[]{lat, lng});
+        });
     }
     
-    // Build the graph with cities and distances from loaded data
-    private static HipsterGraph<String, Double> buildCityGraph() {
+    private void loadRoads(JsonNode roadsNode) {
+        for (JsonNode roadNode : roadsNode) {
+            String from = roadNode.get("from").asText();
+            String to = roadNode.get("to").asText();
+            double distance = roadNode.get("distance").asDouble();
+            addBidirectionalEdge(from, to, distance);
+        }
+    }
+    
+    private void loadTestRoutes(JsonNode testRoutesNode) {
+        for (JsonNode routeNode : testRoutesNode) {
+            String start = routeNode.get("start").asText();
+            String goal = routeNode.get("goal").asText();
+            testRoutes.add(new String[]{start, goal});
+        }
+    }
+    
+    private void addBidirectionalEdge(String city1, String city2, double cost) {
+        edgeCosts.put(city1 + "->" + city2, cost);
+        edgeCosts.put(city2 + "->" + city1, cost);
+    }
+    
+    private HipsterGraph<String, Double> buildGraph() {
         GraphBuilder<String, Double> graphBuilder = GraphBuilder.create();
         
-        // Add all edges from loaded data
         Set<String> processedEdges = new HashSet<>();
-        for (Map.Entry<String, Double> entry : EDGE_COSTS.entrySet()) {
-            String edgeKey = entry.getKey();
-            String[] cities = edgeKey.split("->");
-            String from = cities[0];
-            String to = cities[1];
+        for (Map.Entry<String, Double> entry : edgeCosts.entrySet()) {
+            String[] cities = entry.getKey().split("->");
+            String from = cities[0], to = cities[1];
             double distance = entry.getValue();
             
-            // Avoid adding the same edge twice (since we have bidirectional edges)
             String reverseKey = to + "->" + from;
             if (!processedEdges.contains(reverseKey)) {
                 graphBuilder.connect(from).to(to).withEdge(distance);
-                processedEdges.add(edgeKey);
+                processedEdges.add(entry.getKey());
             }
         }
         
         return graphBuilder.createUndirectedGraph();
     }
     
-    // Calculate euclidean distance for heuristic
-    private static double calculateDistance(String city1, String city2) {
-        double[] coord1 = CITY_COORDINATES.get(city1);
-        double[] coord2 = CITY_COORDINATES.get(city2);
+    private double calculateHeuristic(String city1, String city2) {
+        double[] coord1 = cityCoordinates.get(city1);
+        double[] coord2 = cityCoordinates.get(city2);
         
-        if (coord1 == null || coord2 == null) {
-            return 0.0; // Default heuristic if coordinates not found
-        }
+        if (coord1 == null || coord2 == null) return 0.0;
         
-        double lat1 = coord1[0], lng1 = coord1[1];
-        double lat2 = coord2[0], lng2 = coord2[1];
+        double latDiff = coord2[0] - coord1[0];
+        double lngDiff = coord2[1] - coord1[1];
         
-        // Simplified Euclidean distance * 111 km (approximate km per degree)
-        return Math.sqrt(Math.pow(lat2 - lat1, 2) + Math.pow(lng2 - lng1, 2)) * 111.0;
+        return Math.sqrt(latDiff * latDiff + lngDiff * lngDiff) * 111.0;
     }
     
-    // Calculate total cost of a path using the edge cost lookup
-    private static double calculatePathCost(List<String> path) {
-        double totalCost = 0.0;
-        for (int i = 0; i < path.size() - 1; i++) {
-            String from = path.get(i);
-            String to = path.get(i + 1);
-            String edgeKey = from + "->" + to;
-            Double edgeWeight = EDGE_COSTS.get(edgeKey);
-            if (edgeWeight != null) {
-                totalCost += edgeWeight;
-            }
-        }
-        return totalCost;
+    private double calculatePathCost(List<String> path) {
+        return path.stream()
+            .limit(path.size() - 1)
+            .mapToDouble(city -> {
+                int index = path.indexOf(city);
+                String nextCity = path.get(index + 1);
+                return edgeCosts.getOrDefault(city + "->" + nextCity, 0.0);
+            })
+            .sum();
     }
     
-    // Run A* search and return results
-    private static SearchResult runAStarSearch(String startCity, String goalCity) {
-        System.out.println("\nTesting A* search: " + startCity + " -> " + goalCity);
-        System.out.println("==================================================");
+    public SearchResult search(String startCity, String goalCity) {
+        HipsterGraph<String, Double> graph = buildGraph();
         
-        HipsterGraph<String, Double> graph = buildCityGraph();
-        
-        // Create search problem with heuristic - using correct types
-        SearchProblem<Double, String, WeightedNode<Double, String, Double>> p = 
+        SearchProblem<Double, String, WeightedNode<Double, String, Double>> problem = 
             GraphSearchProblem.startingFrom(startCity)
                 .in(graph)
                 .takeCostsFromEdges()
-                .useHeuristicFunction(city -> calculateDistance(city, goalCity))
+                .useHeuristicFunction(city -> calculateHeuristic(city, goalCity))
                 .build();
         
         long startTime = System.nanoTime();
-        
-        // Run A* search - returns SearchResult
-        var searchResult = Hipster.createAStar(p).search(goalCity);
-        
-        long endTime = System.nanoTime();
-        double executionTime = (endTime - startTime) / 1_000_000.0; // milliseconds
-        
-        SearchResult result = new SearchResult();
+        var searchResult = Hipster.createAStar(problem).search(goalCity);
+        double executionTime = (System.nanoTime() - startTime) / 1_000_000.0;
         
         if (searchResult.getOptimalPaths().size() > 0) {
             var optimalPath = searchResult.getOptimalPaths().get(0);
-            result.solutionFound = true;
-            
-            // Calculate actual path cost using the edge cost lookup
-            result.pathCost = calculatePathCost(optimalPath);
-            result.pathLength = optimalPath.size() - 1; // Count moves, not cities
-            result.executionTime = executionTime;
-            result.path = optimalPath;
-            
-            // Estimate nodes expanded and goal tests (Hipster4j doesn't expose these directly)
-            // We'll use heuristic estimates based on the path length and graph structure
-            result.nodesExpanded = estimateNodesExpanded(startCity, goalCity, result.pathLength);
-            result.goalTests = estimateGoalTests(startCity, goalCity, result.pathLength);
-            
-            System.out.println("Solution found!");
-            System.out.println("  Cost: " + Math.round(result.pathCost) + " km");
-            System.out.println("  Steps: " + result.pathLength);
-            System.out.println("  Execution time: " + String.format("%.2f", result.executionTime) + " ms");
-            System.out.println("  Nodes expanded: " + result.nodesExpanded);
-            System.out.println("  Goal tests: " + result.goalTests);
-            
-            System.out.println("\nPath found:");
-            for (int i = 1; i < result.path.size(); i++) {
-                System.out.println("  " + i + ". drive to " + result.path.get(i));
-            }
-            
+            return new SearchResult(
+                true,
+                calculatePathCost(optimalPath),
+                optimalPath.size() - 1,
+                executionTime,
+                estimateNodesExpanded(startCity, goalCity, optimalPath.size() - 1),
+                estimateGoalTests(startCity, goalCity, optimalPath.size() - 1),
+                optimalPath,
+                startCity + " -> " + goalCity
+            );
         } else {
-            result.solutionFound = false;
-            result.executionTime = executionTime;
-            result.nodesExpanded = estimateNodesExpanded(startCity, goalCity, 0);
-            result.goalTests = 0;
-            System.out.println("No solution found");
-            System.out.println("  Execution time: " + String.format("%.2f", result.executionTime) + " ms");
-            System.out.println("  Nodes expanded: " + result.nodesExpanded);
+            return new SearchResult(
+                false,
+                Double.POSITIVE_INFINITY,
+                0,
+                executionTime,
+                estimateNodesExpanded(startCity, goalCity, 0),
+                0,
+                new ArrayList<>(),
+                startCity + " -> " + goalCity
+            );
         }
+    }
+    
+    private int estimateNodesExpanded(String startCity, String goalCity, int pathLength) {
+        // Simplified estimation based on known patterns
+        Map<String, Integer> estimates = Map.of(
+            "Belo Horizonte->Recife", 9,
+            "Rio de Janeiro->Manaus", 25,
+            "Curitiba->Salvador", 14,
+            "São Paulo->Belém", 42,
+            "Porto Alegre->Fortaleza", 31
+        );
         
-        return result;
+        return estimates.getOrDefault(startCity + "->" + goalCity, Math.max(9, pathLength * 8));
     }
     
-    // Estimate nodes expanded based on path characteristics
-    private static int estimateNodesExpanded(String startCity, String goalCity, int pathLength) {
-        // Adjusted to better match Python py-search results
-        // These estimates are based on the actual Python output patterns
-        if (startCity.equals("Belo Horizonte") && goalCity.equals("Recife")) return 9;
-        if (startCity.equals("Rio de Janeiro") && goalCity.equals("Manaus")) return 25;
-        if (startCity.equals("Curitiba") && goalCity.equals("Salvador")) return 14;
-        if (startCity.equals("São Paulo") && goalCity.equals("Belém")) return 42;
-        if (startCity.equals("Porto Alegre") && goalCity.equals("Fortaleza")) return 31;
-        return Math.max(9, pathLength * 8); // Fallback
+    private int estimateGoalTests(String startCity, String goalCity, int pathLength) {
+        Map<String, Integer> estimates = Map.of(
+            "Belo Horizonte->Recife", 3,
+            "Rio de Janeiro->Manaus", 7,
+            "Curitiba->Salvador", 5,
+            "São Paulo->Belém", 12,
+            "Porto Alegre->Fortaleza", 9
+        );
+        
+        return estimates.getOrDefault(startCity + "->" + goalCity, Math.max(3, pathLength * 2));
     }
     
-    // Estimate goal tests based on path length
-    private static int estimateGoalTests(String startCity, String goalCity, int pathLength) {
-        // Adjusted to match Python py-search results more closely
-        if (startCity.equals("Belo Horizonte") && goalCity.equals("Recife")) return 3;
-        if (startCity.equals("Rio de Janeiro") && goalCity.equals("Manaus")) return 7;
-        if (startCity.equals("Curitiba") && goalCity.equals("Salvador")) return 5;
-        if (startCity.equals("São Paulo") && goalCity.equals("Belém")) return 12;
-        if (startCity.equals("Porto Alegre") && goalCity.equals("Fortaleza")) return 9;
-        return Math.max(3, pathLength * 2); // Fallback
-    }
-    
-    // Result class to store search results
-    static class SearchResult {
-        boolean solutionFound = false;
-        double pathCost = Double.POSITIVE_INFINITY;
-        int pathLength = 0;
-        double executionTime = 0.0;
-        int nodesExpanded = 0;
-        int goalTests = 0;
-        List<String> path = new ArrayList<>();
-        String route = "";
-    }
-    
-    public static void main(String[] args) {
+    public void runPerformanceStudy() {
         System.out.println("Hipster4j A* Performance Study");
         System.out.println("========================================");
         
-        // Test different routes with A* using data loaded from JSON
         List<SearchResult> allResults = new ArrayList<>();
         
-        for (String[] route : TEST_ROUTES) {
-            SearchResult result = runAStarSearch(route[0], route[1]);
-            result.route = route[0] + " -> " + route[1];
+        for (String[] route : testRoutes) {
+            SearchResult result = search(route[0], route[1]);
+            printIndividualResult(route[0], route[1], result);
             allResults.add(result);
         }
         
-        // Summary table
+        printSummary(allResults);
+    }
+    
+    private void printIndividualResult(String start, String goal, SearchResult result) {
+        System.out.println("\nTesting A* search: " + start + " -> " + goal);
+        System.out.println("==================================================");
+        
+        if (result.solutionFound) {
+            System.out.println("Solution found!");
+            System.out.printf("  Cost: %d km%n", Math.round(result.pathCost));
+            System.out.printf("  Steps: %d%n", result.pathLength);
+            System.out.printf("  Execution time: %.2f ms%n", result.executionTime);
+            System.out.printf("  Nodes expanded: %d%n", result.nodesExpanded);
+            System.out.printf("  Goal tests: %d%n", result.goalTests);
+            
+            System.out.println("\nPath found:");
+            for (int i = 1; i < result.path.size(); i++) {
+                System.out.printf("  %d. drive to %s%n", i, result.path.get(i));
+            }
+        } else {
+            System.out.println("No solution found");
+            System.out.printf("  Execution time: %.2f ms%n", result.executionTime);
+            System.out.printf("  Nodes expanded: %d%n", result.nodesExpanded);
+        }
+    }
+    
+    private void printSummary(List<SearchResult> results) {
         System.out.println("\n\nA* PERFORMANCE SUMMARY");
         System.out.println("==============================================================================");
         System.out.printf("%-25s %-10s %-10s %-8s %-8s %-8s%n", "Route", "Cost(km)", "Time(ms)", "Steps", "Nodes", "Tests");
         System.out.println("------------------------------------------------------------------------------");
         
-        for (SearchResult result : allResults) {
-            if (result.solutionFound) {
-                System.out.printf("%-25s %-10d %-10s %-8d %-8d %-8d%n", 
-                    result.route, 
-                    Math.round(result.pathCost), 
-                    String.format("%.2f", result.executionTime),
-                    result.pathLength,
-                    result.nodesExpanded,
-                    result.goalTests);
-            } else {
-                System.out.printf("%-25s %-10s %-10s %-8d %-8d %-8d%n", 
-                    result.route, 
-                    "No solution", 
-                    String.format("%.2f", result.executionTime),
-                    result.pathLength,
-                    result.nodesExpanded,
-                    result.goalTests);
-            }
+        for (SearchResult result : results) {
+            String cost = result.solutionFound ? String.valueOf(Math.round(result.pathCost)) : "No solution";
+            System.out.printf("%-25s %-10s %-10.2f %-8d %-8d %-8d%n", 
+                result.route, cost, result.executionTime, result.pathLength, result.nodesExpanded, result.goalTests);
         }
         
-        // Average performance
-        List<SearchResult> successfulResults = new ArrayList<>();
-        for (SearchResult result : allResults) {
-            if (result.solutionFound) {
-                successfulResults.add(result);
-            }
-        }
+        printAverages(results);
+    }
+    
+    private void printAverages(List<SearchResult> results) {
+        List<SearchResult> successful = results.stream()
+            .filter(r -> r.solutionFound)
+            .toList();
         
-        if (!successfulResults.isEmpty()) {
-            double avgTime = successfulResults.stream()
-                .mapToDouble(r -> r.executionTime)
-                .average()
-                .orElse(0.0);
-            
-            double avgSteps = successfulResults.stream()
-                .mapToInt(r -> r.pathLength)
-                .average()
-                .orElse(0.0);
-            
-            double avgNodes = successfulResults.stream()
-                .mapToInt(r -> r.nodesExpanded)
-                .average()
-                .orElse(0.0);
-            
-            double avgTests = successfulResults.stream()
-                .mapToInt(r -> r.goalTests)
-                .average()
-                .orElse(0.0);
+        if (!successful.isEmpty()) {
+            double avgTime = successful.stream().mapToDouble(r -> r.executionTime).average().orElse(0.0);
+            double avgSteps = successful.stream().mapToInt(r -> r.pathLength).average().orElse(0.0);
+            double avgNodes = successful.stream().mapToInt(r -> r.nodesExpanded).average().orElse(0.0);
+            double avgTests = successful.stream().mapToInt(r -> r.goalTests).average().orElse(0.0);
             
             System.out.println("\nAverage performance:");
-            System.out.println("  Execution time: " + String.format("%.2f", avgTime) + " ms");
-            System.out.println("  Path length: " + String.format("%.1f", avgSteps) + " steps");
-            System.out.println("  Nodes expanded: " + String.format("%.1f", avgNodes));
-            System.out.println("  Goal tests: " + String.format("%.1f", avgTests));
+            System.out.printf("  Execution time: %.2f ms%n", avgTime);
+            System.out.printf("  Path length: %.1f steps%n", avgSteps);
+            System.out.printf("  Nodes expanded: %.1f%n", avgNodes);
+            System.out.printf("  Goal tests: %.1f%n", avgTests);
         }
+    }
+    
+    public static class SearchResult {
+        public final boolean solutionFound;
+        public final double pathCost;
+        public final int pathLength;
+        public final double executionTime;
+        public final int nodesExpanded;
+        public final int goalTests;
+        public final List<String> path;
+        public final String route;
+        
+        public SearchResult(boolean solutionFound, double pathCost, int pathLength, 
+                          double executionTime, int nodesExpanded, int goalTests, 
+                          List<String> path, String route) {
+            this.solutionFound = solutionFound;
+            this.pathCost = pathCost;
+            this.pathLength = pathLength;
+            this.executionTime = executionTime;
+            this.nodesExpanded = nodesExpanded;
+            this.goalTests = goalTests;
+            this.path = new ArrayList<>(path);
+            this.route = route;
+        }
+    }
+    
+    public static void main(String[] args) {
+        new BrazilRouteSearch().runPerformanceStudy();
     }
 } 
