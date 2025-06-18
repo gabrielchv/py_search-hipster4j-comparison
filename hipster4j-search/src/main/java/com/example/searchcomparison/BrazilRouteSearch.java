@@ -133,8 +133,6 @@ public class BrazilRouteSearch {
                 calculatePathCost(optimalPath),
                 optimalPath.size() - 1,
                 executionTime,
-                estimateNodesExpanded(startCity, goalCity, optimalPath.size() - 1),
-                estimateGoalTests(startCity, goalCity, optimalPath.size() - 1),
                 optimalPath,
                 startCity + " -> " + goalCity
             );
@@ -144,37 +142,10 @@ public class BrazilRouteSearch {
                 Double.POSITIVE_INFINITY,
                 0,
                 executionTime,
-                estimateNodesExpanded(startCity, goalCity, 0),
-                0,
                 new ArrayList<>(),
                 startCity + " -> " + goalCity
             );
         }
-    }
-    
-    private int estimateNodesExpanded(String startCity, String goalCity, int pathLength) {
-        // Simplified estimation based on known patterns
-        Map<String, Integer> estimates = Map.of(
-            "Belo Horizonte->Recife", 9,
-            "Rio de Janeiro->Manaus", 25,
-            "Curitiba->Salvador", 14,
-            "São Paulo->Belém", 42,
-            "Porto Alegre->Fortaleza", 31
-        );
-        
-        return estimates.getOrDefault(startCity + "->" + goalCity, Math.max(9, pathLength * 8));
-    }
-    
-    private int estimateGoalTests(String startCity, String goalCity, int pathLength) {
-        Map<String, Integer> estimates = Map.of(
-            "Belo Horizonte->Recife", 3,
-            "Rio de Janeiro->Manaus", 7,
-            "Curitiba->Salvador", 5,
-            "São Paulo->Belém", 12,
-            "Porto Alegre->Fortaleza", 9
-        );
-        
-        return estimates.getOrDefault(startCity + "->" + goalCity, Math.max(3, pathLength * 2));
     }
     
     public void runPerformanceStudy() {
@@ -201,8 +172,8 @@ public class BrazilRouteSearch {
             System.out.printf("  Cost: %d km%n", Math.round(result.pathCost));
             System.out.printf("  Steps: %d%n", result.pathLength);
             System.out.printf("  Execution time: %.2f ms%n", result.executionTime);
-            System.out.printf("  Nodes expanded: %d%n", result.nodesExpanded);
-            System.out.printf("  Goal tests: %d%n", result.goalTests);
+            System.out.println("  Nodes expanded: N/A (not available in Hipster4j)");
+            System.out.println("  Goal tests: N/A (not available in Hipster4j)");
             
             System.out.println("\nPath found:");
             for (int i = 1; i < result.path.size(); i++) {
@@ -211,20 +182,20 @@ public class BrazilRouteSearch {
         } else {
             System.out.println("No solution found");
             System.out.printf("  Execution time: %.2f ms%n", result.executionTime);
-            System.out.printf("  Nodes expanded: %d%n", result.nodesExpanded);
+            System.out.println("  Nodes expanded: N/A (not available in Hipster4j)");
         }
     }
     
     private void printSummary(List<SearchResult> results) {
         System.out.println("\n\nA* PERFORMANCE SUMMARY");
         System.out.println("==============================================================================");
-        System.out.printf("%-25s %-10s %-10s %-8s %-8s %-8s%n", "Route", "Cost(km)", "Time(ms)", "Steps", "Nodes", "Tests");
+        System.out.printf("%-25s %-10s %-10s %-8s %-20s %-15s%n", "Route", "Cost(km)", "Time(ms)", "Steps", "Nodes", "Tests");
         System.out.println("------------------------------------------------------------------------------");
         
         for (SearchResult result : results) {
             String cost = result.solutionFound ? String.valueOf(Math.round(result.pathCost)) : "No solution";
-            System.out.printf("%-25s %-10s %-10.2f %-8d %-8d %-8d%n", 
-                result.route, cost, result.executionTime, result.pathLength, result.nodesExpanded, result.goalTests);
+            System.out.printf("%-25s %-10s %-10.2f %-8d %-20s %-15s%n", 
+                result.route, cost, result.executionTime, result.pathLength, "N/A", "N/A");
         }
         
         printAverages(results);
@@ -238,14 +209,12 @@ public class BrazilRouteSearch {
         if (!successful.isEmpty()) {
             double avgTime = successful.stream().mapToDouble(r -> r.executionTime).average().orElse(0.0);
             double avgSteps = successful.stream().mapToInt(r -> r.pathLength).average().orElse(0.0);
-            double avgNodes = successful.stream().mapToInt(r -> r.nodesExpanded).average().orElse(0.0);
-            double avgTests = successful.stream().mapToInt(r -> r.goalTests).average().orElse(0.0);
             
             System.out.println("\nAverage performance:");
             System.out.printf("  Execution time: %.2f ms%n", avgTime);
             System.out.printf("  Path length: %.1f steps%n", avgSteps);
-            System.out.printf("  Nodes expanded: %.1f%n", avgNodes);
-            System.out.printf("  Goal tests: %.1f%n", avgTests);
+            System.out.println("  Nodes expanded: N/A (not available in Hipster4j)");
+            System.out.println("  Goal tests: N/A (not available in Hipster4j)");
         }
     }
     
@@ -254,20 +223,15 @@ public class BrazilRouteSearch {
         public final double pathCost;
         public final int pathLength;
         public final double executionTime;
-        public final int nodesExpanded;
-        public final int goalTests;
         public final List<String> path;
         public final String route;
         
         public SearchResult(boolean solutionFound, double pathCost, int pathLength, 
-                          double executionTime, int nodesExpanded, int goalTests, 
-                          List<String> path, String route) {
+                          double executionTime, List<String> path, String route) {
             this.solutionFound = solutionFound;
             this.pathCost = pathCost;
             this.pathLength = pathLength;
             this.executionTime = executionTime;
-            this.nodesExpanded = nodesExpanded;
-            this.goalTests = goalTests;
             this.path = new ArrayList<>(path);
             this.route = route;
         }

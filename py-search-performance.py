@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-A* Search Performance Study using py-search library
-Comparing search performance across different routes in Brazil
-"""
-
 import time
 import json
 import math
