@@ -1,43 +1,55 @@
+#!/usr/bin/env python3
+"""
+A* Search Performance Study using py-search library
+Comparing search performance across different routes in Brazil
+"""
+
+import time
+import json
+import math
 from py_search.base import Problem, Node, AnnotatedProblem
 from py_search.informed import best_first_search
-import time
-import math
+
+# Load data from JSON file
+def load_data():
+    with open('brazil_cities_data.json', 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+# Load shared data
+data = load_data()
+CITY_COORDINATES = data['cities']
+ROADS_DATA = data['roads']
+TEST_ROUTES = data['test_routes']
+
+# Build roads dictionary from JSON data
+roads = {}
+for road in ROADS_DATA:
+    from_city = road['from']
+    to_city = road['to']
+    distance = road['distance']
+    
+    # Add bidirectional connections
+    if from_city not in roads:
+        roads[from_city] = {}
+    if to_city not in roads:
+        roads[to_city] = {}
+    
+    roads[from_city][to_city] = distance
+    roads[to_city][from_city] = distance
 
 # Simple Brazil cities map for testing
-brazil_cities = {
-    'São Paulo': (-23.55, -46.63),
-    'Rio de Janeiro': (-22.91, -43.21),
-    'Belo Horizonte': (-19.92, -43.93),
-    'Brasília': (-15.79, -47.88),
-    'Salvador': (-12.97, -38.48),
-    'Fortaleza': (-3.73, -38.53),
-    'Manaus': (-3.12, -60.02),
-    'Porto Alegre': (-30.03, -51.23),
-    'Curitiba': (-25.43, -49.27),
-    'Recife': (-8.05, -34.90),
-    'Belém': (-1.46, -48.50)
-}
-
-# Road connections (simplified for testing)
-roads = {
-    'São Paulo': [('Rio de Janeiro', 430), ('Belo Horizonte', 580), ('Curitiba', 410), ('Brasília', 1020)],
-    'Rio de Janeiro': [('São Paulo', 430), ('Belo Horizonte', 440), ('Brasília', 1170), ('Salvador', 1630)],
-    'Belo Horizonte': [('São Paulo', 580), ('Rio de Janeiro', 440), ('Brasília', 730), ('Salvador', 1370)],
-    'Brasília': [('São Paulo', 1020), ('Rio de Janeiro', 1170), ('Belo Horizonte', 730), ('Salvador', 1440), ('Fortaleza', 2200), ('Manaus', 3450)],
-    'Salvador': [('Rio de Janeiro', 1630), ('Belo Horizonte', 1370), ('Brasília', 1440), ('Recife', 840), ('Fortaleza', 1200)],
-    'Fortaleza': [('Salvador', 1200), ('Brasília', 2200), ('Recife', 810), ('Belém', 1400)],
-    'Manaus': [('Brasília', 3450), ('Belém', 1300)],
-    'Porto Alegre': [('São Paulo', 1130), ('Curitiba', 710)],
-    'Curitiba': [('São Paulo', 410), ('Porto Alegre', 710)],
-    'Recife': [('Salvador', 840), ('Fortaleza', 810)],
-    'Belém': [('Manaus', 1300), ('Fortaleza', 1400)]
-}
+brazil_cities = CITY_COORDINATES
 
 def calculate_distance(city1, city2):
-    # Simple euclidean distance for heuristic
-    lat1, lon1 = brazil_cities[city1]
-    lat2, lon2 = brazil_cities[city2]
-    return math.sqrt((lat2-lat1)**2 + (lon2-lon1)**2) * 111  # rough km conversion
+    """Calculate Euclidean distance between two cities (heuristic function)"""
+    if city1 not in brazil_cities or city2 not in brazil_cities:
+        return 0
+    
+    lat1, lng1 = brazil_cities[city1]['lat'], brazil_cities[city1]['lng']
+    lat2, lng2 = brazil_cities[city2]['lat'], brazil_cities[city2]['lng']
+    
+    # Simplified Euclidean distance * 111 km (approximate km per degree)
+    return math.sqrt((lat2 - lat1)**2 + (lng2 - lng1)**2) * 111
 
 class RouteProblem(Problem):
     def __init__(self, start, goal):
@@ -47,7 +59,7 @@ class RouteProblem(Problem):
         current = node.state
         result = []
         if current in roads:
-            for city, distance in roads[current]:
+            for city, distance in roads[current].items():
                 new_node = Node(city, parent=node, action=f"drive to {city}", node_cost=node.cost() + distance)
                 result.append(new_node)
         return result
@@ -116,20 +128,13 @@ def run_astar_test(start_city, goal_city):
 
 def main():
     print("Py-Search A* Performance Study")
-    print("=" * 40)
+    print("========================================")
     
     # Test different routes with A*
-    test_routes = [
-        ("São Paulo", "Belém"),
-        ("Rio de Janeiro", "Manaus"),
-        ("Curitiba", "Salvador"),
-        ("Porto Alegre", "Fortaleza"),
-        ("Belo Horizonte", "Recife")
-    ]
-    
     all_results = []
     
-    for start, goal in test_routes:
+    for route in TEST_ROUTES:
+        start, goal = route['start'], route['goal']
         result = run_astar_test(start, goal)
         result['route'] = f"{start} -> {goal}"
         all_results.append(result)

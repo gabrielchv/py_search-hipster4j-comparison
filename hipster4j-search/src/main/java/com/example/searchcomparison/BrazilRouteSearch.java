@@ -7,63 +7,60 @@ import es.usc.citius.hipster.graph.HipsterGraph;
 import es.usc.citius.hipster.model.problem.SearchProblem;
 import es.usc.citius.hipster.model.impl.WeightedNode;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+
 import java.util.*;
+import java.io.InputStream;
+import java.io.IOException;
 
 public class BrazilRouteSearch {
     
-    // Brazil major cities with coordinates (lat, lng) - matching Python version
-    private static final Map<String, double[]> CITY_COORDINATES = new HashMap<>();
+    // Data loaded from JSON
+    private static Map<String, double[]> CITY_COORDINATES = new HashMap<>();
+    private static Map<String, Double> EDGE_COSTS = new HashMap<>();
+    private static List<String[]> TEST_ROUTES = new ArrayList<>();
+    
+    // Load data from JSON file
     static {
-        CITY_COORDINATES.put("São Paulo", new double[]{-23.55, -46.63});
-        CITY_COORDINATES.put("Rio de Janeiro", new double[]{-22.91, -43.21});
-        CITY_COORDINATES.put("Belo Horizonte", new double[]{-19.92, -43.93});
-        CITY_COORDINATES.put("Brasília", new double[]{-15.79, -47.88});
-        CITY_COORDINATES.put("Salvador", new double[]{-12.97, -38.48});
-        CITY_COORDINATES.put("Fortaleza", new double[]{-3.73, -38.53});
-        CITY_COORDINATES.put("Manaus", new double[]{-3.12, -60.02});
-        CITY_COORDINATES.put("Porto Alegre", new double[]{-30.03, -51.23});
-        CITY_COORDINATES.put("Curitiba", new double[]{-25.43, -49.27});
-        CITY_COORDINATES.put("Recife", new double[]{-8.05, -34.90});
-        CITY_COORDINATES.put("Belém", new double[]{-1.46, -48.50});
+        loadDataFromJson();
     }
     
-    // Edge cost lookup table - matching Python roads exactly
-    private static final Map<String, Double> EDGE_COSTS = new HashMap<>();
-    static {
-        // São Paulo connections
-        addBidirectionalEdge("São Paulo", "Rio de Janeiro", 430.0);
-        addBidirectionalEdge("São Paulo", "Belo Horizonte", 580.0);
-        addBidirectionalEdge("São Paulo", "Curitiba", 410.0);
-        addBidirectionalEdge("São Paulo", "Brasília", 1020.0);
-        
-        // Rio de Janeiro connections
-        addBidirectionalEdge("Rio de Janeiro", "Belo Horizonte", 440.0);
-        addBidirectionalEdge("Rio de Janeiro", "Brasília", 1170.0);
-        addBidirectionalEdge("Rio de Janeiro", "Salvador", 1630.0);
-        
-        // Belo Horizonte connections
-        addBidirectionalEdge("Belo Horizonte", "Brasília", 730.0);
-        addBidirectionalEdge("Belo Horizonte", "Salvador", 1370.0);
-        
-        // Brasília connections
-        addBidirectionalEdge("Brasília", "Salvador", 1440.0);
-        addBidirectionalEdge("Brasília", "Fortaleza", 2200.0);
-        addBidirectionalEdge("Brasília", "Manaus", 3450.0);
-        
-        // Salvador connections
-        addBidirectionalEdge("Salvador", "Recife", 840.0);
-        addBidirectionalEdge("Salvador", "Fortaleza", 1200.0);
-        
-        // Fortaleza connections
-        addBidirectionalEdge("Fortaleza", "Recife", 810.0);
-        addBidirectionalEdge("Fortaleza", "Belém", 1400.0);
-        
-        // Manaus connections
-        addBidirectionalEdge("Manaus", "Belém", 1300.0);
-        
-        // Porto Alegre connections
-        addBidirectionalEdge("Porto Alegre", "São Paulo", 1130.0);
-        addBidirectionalEdge("Porto Alegre", "Curitiba", 710.0);
+    private static void loadDataFromJson() {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            InputStream inputStream = BrazilRouteSearch.class.getResourceAsStream("/brazil_cities_data.json");
+            JsonNode rootNode = mapper.readTree(inputStream);
+            
+            // Load city coordinates
+            JsonNode citiesNode = rootNode.get("cities");
+            citiesNode.fieldNames().forEachRemaining(cityName -> {
+                JsonNode cityData = citiesNode.get(cityName);
+                double lat = cityData.get("lat").asDouble();
+                double lng = cityData.get("lng").asDouble();
+                CITY_COORDINATES.put(cityName, new double[]{lat, lng});
+            });
+            
+            // Load roads
+            JsonNode roadsNode = rootNode.get("roads");
+            for (JsonNode roadNode : roadsNode) {
+                String from = roadNode.get("from").asText();
+                String to = roadNode.get("to").asText();
+                double distance = roadNode.get("distance").asDouble();
+                addBidirectionalEdge(from, to, distance);
+            }
+            
+            // Load test routes
+            JsonNode testRoutesNode = rootNode.get("test_routes");
+            for (JsonNode routeNode : testRoutesNode) {
+                String start = routeNode.get("start").asText();
+                String goal = routeNode.get("goal").asText();
+                TEST_ROUTES.add(new String[]{start, goal});
+            }
+            
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load data from JSON file", e);
+        }
     }
     
     private static void addBidirectionalEdge(String city1, String city2, double cost) {
@@ -71,44 +68,26 @@ public class BrazilRouteSearch {
         EDGE_COSTS.put(city2 + "->" + city1, cost);
     }
     
-    // Build the graph with cities and distances - matching Python roads exactly
+    // Build the graph with cities and distances from loaded data
     private static HipsterGraph<String, Double> buildCityGraph() {
         GraphBuilder<String, Double> graphBuilder = GraphBuilder.create();
         
-        // São Paulo connections
-        graphBuilder.connect("São Paulo").to("Rio de Janeiro").withEdge(430.0);
-        graphBuilder.connect("São Paulo").to("Belo Horizonte").withEdge(580.0);
-        graphBuilder.connect("São Paulo").to("Curitiba").withEdge(410.0);
-        graphBuilder.connect("São Paulo").to("Brasília").withEdge(1020.0);
-        
-        // Rio de Janeiro connections
-        graphBuilder.connect("Rio de Janeiro").to("Belo Horizonte").withEdge(440.0);
-        graphBuilder.connect("Rio de Janeiro").to("Brasília").withEdge(1170.0);
-        graphBuilder.connect("Rio de Janeiro").to("Salvador").withEdge(1630.0);
-        
-        // Belo Horizonte connections
-        graphBuilder.connect("Belo Horizonte").to("Brasília").withEdge(730.0);
-        graphBuilder.connect("Belo Horizonte").to("Salvador").withEdge(1370.0);
-        
-        // Brasília connections
-        graphBuilder.connect("Brasília").to("Salvador").withEdge(1440.0);
-        graphBuilder.connect("Brasília").to("Fortaleza").withEdge(2200.0);
-        graphBuilder.connect("Brasília").to("Manaus").withEdge(3450.0);
-        
-        // Salvador connections
-        graphBuilder.connect("Salvador").to("Recife").withEdge(840.0);
-        graphBuilder.connect("Salvador").to("Fortaleza").withEdge(1200.0);
-        
-        // Fortaleza connections
-        graphBuilder.connect("Fortaleza").to("Recife").withEdge(810.0);
-        graphBuilder.connect("Fortaleza").to("Belém").withEdge(1400.0);
-        
-        // Manaus connections
-        graphBuilder.connect("Manaus").to("Belém").withEdge(1300.0);
-        
-        // Porto Alegre connections
-        graphBuilder.connect("Porto Alegre").to("São Paulo").withEdge(1130.0);
-        graphBuilder.connect("Porto Alegre").to("Curitiba").withEdge(710.0);
+        // Add all edges from loaded data
+        Set<String> processedEdges = new HashSet<>();
+        for (Map.Entry<String, Double> entry : EDGE_COSTS.entrySet()) {
+            String edgeKey = entry.getKey();
+            String[] cities = edgeKey.split("->");
+            String from = cities[0];
+            String to = cities[1];
+            double distance = entry.getValue();
+            
+            // Avoid adding the same edge twice (since we have bidirectional edges)
+            String reverseKey = to + "->" + from;
+            if (!processedEdges.contains(reverseKey)) {
+                graphBuilder.connect(from).to(to).withEdge(distance);
+                processedEdges.add(edgeKey);
+            }
+        }
         
         return graphBuilder.createUndirectedGraph();
     }
@@ -248,18 +227,10 @@ public class BrazilRouteSearch {
         System.out.println("Hipster4j A* Performance Study");
         System.out.println("========================================");
         
-        // Test different routes with A*
-        String[][] testRoutes = {
-            {"São Paulo", "Belém"},
-            {"Rio de Janeiro", "Manaus"},
-            {"Curitiba", "Salvador"},
-            {"Porto Alegre", "Fortaleza"},
-            {"Belo Horizonte", "Recife"}
-        };
-        
+        // Test different routes with A* using data loaded from JSON
         List<SearchResult> allResults = new ArrayList<>();
         
-        for (String[] route : testRoutes) {
+        for (String[] route : TEST_ROUTES) {
             SearchResult result = runAStarSearch(route[0], route[1]);
             result.route = route[0] + " -> " + route[1];
             allResults.add(result);
